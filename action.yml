@@ -1,0 +1,102 @@
+name: ops-notify
+description: >
+  Post one message to a Telegram ops group from CI (deploy ok / deploy failed / ...), using
+  ops-notify.sh and the topic table topics.env that sit next to this file. The bot token and the
+  chat id come from the caller's own secrets; nothing secret lives in this repository.
+
+# Usage (any repository, public or private):
+#
+#   - name: Notify (deploy ok)
+#     uses: dontkaiad/ops-notify@v1
+#     with:
+#       project: klgpff
+#       kind: deploy_ok
+#       token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+#       chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+#
+#   - name: Notify (deploy failed)
+#     if: failure()
+#     uses: dontkaiad/ops-notify@v1
+#     with:
+#       project: klgpff
+#       kind: deploy_fail
+#       title: Deploy over SSH          # the failed step
+#       token: ${{ secrets.TG_LOG_BOT_TOKEN }}
+#       chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
+#
+# deploy_ok: the title defaults to the first line of the commit message and the sha to the
+# commit that was deployed (also for workflow_run-triggered deploys). deploy_fail adds the
+# link to this run. A notification problem never fails the calling job (continue-on-error),
+# except in test mode.
+#
+# The run log shows the result of every send (`ops-notify: <time> ok project=... thread=... http=200`);
+# when Telegram did not accept the message the step prints a ::warning:: with the reason and
+# still does not fail the job.
+
+inputs:
+  project:
+    description: Key from topics.env (klgpff, job-hunter, nexus, ...) used for the label and the topic
+    required: true
+  kind:
+    description: deploy_ok | deploy_fail | error | warn | recovered | start | ...
+    required: true
+  title:
+    description: Main line. deploy_ok defaults to the commit subject; deploy_fail wants the failed step
+    required: false
+    default: ''
+  body:
+    description: Optional second line
+    required: false
+    default: ''
+  sha:
+    description: Commit sha (shown as 7 characters). Defaults to the deployed commit
+    required: false
+    default: ''
+  token:
+    description: Bot token (the caller's TG_LOG_BOT_TOKEN secret)
+    required: true
+  chat-id:
+    description: Chat id (the caller's TG_LOG_CHAT_ID secret)
+    required: true
+  test:
+    description: "'true' = send silently, wait, delete the message again, and fail the step if either part fails"
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Send the ops message
+      shell: bash
+      continue-on-error: ${{ inputs.test != 'true' }}
+      env:
+        TG_LOG_BOT_TOKEN: ${{ inputs.token }}
+        TG_LOG_CHAT_ID: ${{ inputs.chat-id }}
+        IN_PROJECT: ${{ inputs.project }}
+        IN_KIND: ${{ inputs.kind }}
+        IN_TITLE: ${{ inputs.title }}
+        IN_BODY: ${{ inputs.body }}
+        HEAD_MSG: ${{ github.event.head_commit.message || github.event.workflow_run.head_commit.message || '' }}
+        OPS_SHA: ${{ inputs.sha || github.event.workflow_run.head_sha || github.sha }}
+        OPS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        OPS_TEST: ${{ inputs.test == 'true' && '1' || '' }}
+        OPS_LOG_DIR: ${{ runner.temp }}/ops-notify
+      run: |
+        # all inputs come through env, never interpolated into this script
+        title="$IN_TITLE"
+        if [ -z "$title" ] && [ "$IN_KIND" = "deploy_ok" ]; then title="$(printf '%s' "$HEAD_MSG" | head -n 1)"; fi
+        LOG="$OPS_LOG_DIR/notify.log"
+        before=0; [ -f "$LOG" ] && before=$(wc -l < "$LOG")
+        rc=0
+        "$GITHUB_ACTION_PATH/ops-notify.sh" "$IN_PROJECT" "$IN_KIND" "$title" "$IN_BODY" || rc=$?
+        # ops-notify.sh never fails its caller and keeps the result only in its own log, which
+        # dies with the runner. Print the lines this call added (timestamp, project, kind, topic,
+        # http code, Telegram's short error text; never the token or the message text), and
+        # raise a warning when the message was not accepted.
+        new=""; [ -f "$LOG" ] && new=$(tail -n +"$((before + 1))" "$LOG")
+        if [ -n "$new" ]; then printf 'ops-notify: %s\n' "$new"; else echo "ops-notify: no log line written"; fi
+        if ! grep -qE '^[^ ]+ ok project=.* http=200' <<<"$new"; then
+          reason=$(printf '%s' "${new:-no log line written}" | tr '\n' ';' | cut -c1-300)
+          echo "::warning title=ops-notify: message not delivered::${reason}"
+        fi
+        exit "$rc"
