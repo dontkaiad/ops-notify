@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ops-notify.sh <project> <kind> <title> [body]
 #
-# One sender for every ops message (deploys, monitor, backups, pulse).
+# One sender for every ops message.
 # Never fails the caller: always exits 0; problems go to notify.log.
 #
-#   project  a key from topics.env (nexus, arcana, job-hunter, server, ...)
+#   project  a key from topics.env, whose rows are "name: <thread id | general> <emoji>"
 #   kind     deploy_ok | deploy_fail | error | warn | recovered | start |
 #            server | disk | ram | site | cert | backup_ok | backup_fail | pulse
 #   title    main line (deploy_ok: commit subject; deploy_fail: failed step;
@@ -23,9 +23,9 @@
 #                  kept in memory only. Exit code 3 if the send or the delete failed.
 #   OPS_TOPICS_FILE, OPS_MONITOR_ENV, OPS_LOG_DIR  path overrides (tests)
 #
-# Secrets: TG_LOG_BOT_TOKEN / TG_LOG_CHAT_ID are READ (not sourced) from
-# monitor.env. The token goes to curl through `-K -` on stdin, so it never
-# appears in argv / `ps` and never in the log.
+# Secrets: TG_LOG_BOT_TOKEN / TG_LOG_CHAT_ID come from the environment, or are
+# READ (not sourced) from an env file. The token goes to curl through `-K -` on
+# stdin, so it never appears in argv / `ps` and never in the log.
 
 : "${OPS_LOCALE:=C.UTF-8}"
 export LC_ALL="$OPS_LOCALE"
@@ -76,7 +76,7 @@ field() { # field <escaped> <max>  -> escape + truncate in the right order
   trunc "$(esc "$1")" "$2"
 }
 
-env_value() { # env_value NAME -> value of NAME from monitor.env (parsed, never executed)
+env_value() { # env_value NAME -> value of NAME from the env file (parsed, never executed)
   grep -E "^[[:space:]]*(export[[:space:]]+)?$1=" "$MONITOR_ENV" 2>/dev/null | tail -1 \
     | sed -E "s/^[^=]*=//; s/^[\"']//; s/[\"']\$//"
 }
@@ -124,7 +124,7 @@ fi
 THREAD="${ROW%% *}"
 PEMOJI="$(printf '%s' "$ROW" | awk '{print $2}')"
 # OPS_TOPIC=<topics.env key>: keep the project's label/emoji but post into another
-# topic (backups are labelled by project yet all go to "server").
+# topic.
 if [ -n "${OPS_TOPIC:-}" ]; then
   TROW="$(topic_row "$OPS_TOPIC")"
   if [ -n "$TROW" ]; then THREAD="${TROW%% *}"; else log "unknown-topic OPS_TOPIC=$OPS_TOPIC"; fi
@@ -195,8 +195,8 @@ if [ -n "${OPS_DRYRUN:-}" ]; then
 fi
 
 # --- send -------------------------------------------------------------------
-# env wins (GitHub Actions passes repo secrets this way); on the server both
-# come from monitor.env.
+# env wins (GitHub Actions passes repo secrets this way); otherwise both are
+# read from the env file.
 TOKEN="${TG_LOG_BOT_TOKEN:-$(env_value TG_LOG_BOT_TOKEN)}"
 CHAT="${TG_LOG_CHAT_ID:-$(env_value TG_LOG_CHAT_ID)}"
 if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then

@@ -1,41 +1,14 @@
 name: ops-notify
-description: >
-  Post one message to a Telegram ops group from CI (deploy ok / deploy failed / ...), using
-  ops-notify.sh and the topic table topics.env that sit next to this file. The bot token and the
-  chat id come from the caller's own secrets; nothing secret lives in this repository.
+description: Telegram ops alerts action
 
-# Usage (any repository, public or private):
-#
-#   - name: Notify (deploy ok)
-#     uses: dontkaiad/ops-notify@v1
-#     with:
-#       project: klgpff
-#       kind: deploy_ok
-#       token: ${{ secrets.TG_LOG_BOT_TOKEN }}
-#       chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
-#
-#   - name: Notify (deploy failed)
-#     if: failure()
-#     uses: dontkaiad/ops-notify@v1
-#     with:
-#       project: klgpff
-#       kind: deploy_fail
-#       title: Deploy over SSH          # the failed step
-#       token: ${{ secrets.TG_LOG_BOT_TOKEN }}
-#       chat-id: ${{ secrets.TG_LOG_CHAT_ID }}
-#
-# deploy_ok: the title defaults to the first line of the commit message and the sha to the
-# commit that was deployed (also for workflow_run-triggered deploys). deploy_fail adds the
-# link to this run. A notification problem never fails the calling job (continue-on-error),
-# except in test mode.
-#
-# The run log shows the result of every send (`ops-notify: <time> ok project=... thread=... http=200`);
-# when Telegram did not accept the message the step prints a ::warning:: with the reason and
-# still does not fail the job.
+# Usage: see README.md. A notification problem never fails the calling job
+# (continue-on-error), except in test mode. The run log shows the result of every send
+# (`ops-notify: <time> ok project=... thread=... http=200`); when Telegram did not accept
+# the message the step prints a ::warning:: with the reason.
 
 inputs:
   project:
-    description: Key from topics.env (klgpff, job-hunter, nexus, ...) used for the label and the topic
+    description: Key from topics.env, used for the label and the topic
     required: true
   kind:
     description: deploy_ok | deploy_fail | error | warn | recovered | start | ...
@@ -53,10 +26,10 @@ inputs:
     required: false
     default: ''
   token:
-    description: Bot token (the caller's TG_LOG_BOT_TOKEN secret)
+    description: Telegram bot token (pass it from a secret)
     required: true
   chat-id:
-    description: Chat id (the caller's TG_LOG_CHAT_ID secret)
+    description: Telegram chat id (pass it from a secret)
     required: true
   test:
     description: "'true' = send silently, wait, delete the message again, and fail the step if either part fails"
